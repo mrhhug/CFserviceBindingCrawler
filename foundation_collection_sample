@@ -1,0 +1,7 @@
+#assumes admin
+foundation["api.cloudfoundry.myenterprise.net"] = "MichaelIsMetal"
+foundation["api.sys.foundation.yourenterprise.net"] = "MichaelIsMetal"
+foundation["api.sys.pcf.homelab.io"] = "MichaelIsMetal"
+#foundation["api.examprle.org"] = "MichaelIsMetal" #this guy has a mispelling
+foundation["api.example.org"] = "MichaelIsMetal"
+
