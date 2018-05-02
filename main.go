@@ -4,7 +4,9 @@ import (
 	"io"
 	"os"
 	"fmt"
+	"flag"
 	"bufio"
+	"strings"
 	"net/url"
 	"strconv"
 	"encoding/csv"
@@ -14,6 +16,8 @@ import (
 
 var Cfendpoints []cfEndpoint
 var Foundations []foundation
+var csvFileName string
+var labelsToQuery string
 
 type cfEndpoint struct {
 	ApiAddress		string			`json:"apiaddress"`
@@ -42,6 +46,7 @@ type credentials struct {
 	Host			string			`json:"host,omitempty"`
 	User			string			`json:"user,omitempty"`
 	Password		string			`json:"password,omitempty"`
+	Port			float64			`json:"port,omitempty"`
 }
 type application struct {
 	Name			string			`json:"app"`
@@ -50,7 +55,7 @@ type application struct {
 }
 
 func ParseConfigFile() {
-	csvFile, _ := os.Open("cfendpoints.csv")
+	csvFile, _ := os.Open(csvFileName)
 	reader := csv.NewReader(bufio.NewReader(csvFile))
 	for {
 		line, error := reader.Read()
@@ -59,13 +64,16 @@ func ParseConfigFile() {
 		} else if error != nil {
 			fmt.Fprintln(os.Stderr, error)
 		}
-		b, _ := strconv.ParseBool(line[3])
-		Cfendpoints = append(Cfendpoints, cfEndpoint{
-			ApiAddress:		line[0],
-			Username:		line[1],
-			Password:		line[2],
-			SkipSslValidation:	b,
-		})
+		//check for comments (#)
+		if 35 != strings.TrimSpace(line[0])[0] {
+			b, _ := strconv.ParseBool(line[3])
+			Cfendpoints = append(Cfendpoints, cfEndpoint{
+				ApiAddress:		line[0],
+				Username:		line[1],
+				Password:		line[2],
+				SkipSslValidation:	b,
+			})
+		}
 	}
 	//cfendpointsJson, _ := json.Marshal(cfendpoints)
 	//fmt.Println(string(cfendpointsJson))
@@ -87,9 +95,10 @@ func QueryFoundation(apiaddress string, username string, password string, skipss
 		ApiEndpoint: apiaddress,
 	}
 	v := url.Values{}
-	//this label is suspect, different versions of redis have different labels
-	//v.Set("q", "label:redislabs")
-	//v.Set("q", "label:redislabs-enterprise-cluster")
+	if labelsToQuery != "" {
+		v.Set("q", "label IN " + labelsToQuery)
+	}
+	//fmt.Println(v.Encode())
 //first get the service
 	services, _ := client.ListServicesByQuery(v)
 	for _, h := range services {
@@ -117,7 +126,8 @@ func QueryFoundation(apiaddress string, username string, password string, skipss
 				//situation where a service broker exists without bindings
 				if len(serviceBinding) > 0 {
 //finally we print the binding details and iterate the apps
-				credsMap := serviceBinding[0].Credentials.(map[string]interface{})
+					credsMap := serviceBinding[0].Credentials.(map[string]interface{})
+					//fmt.Printf("%+v\n\n", reflect.TypeOf(credsMap["port"]))
 					myCredentials := credentials {}
 					if str, ok := credsMap["host"].(string); ok {
 						myCredentials.Host = str
@@ -127,6 +137,9 @@ func QueryFoundation(apiaddress string, username string, password string, skipss
 					}
 					if str, ok := credsMap["password"].(string); ok {
 						myCredentials.Password = str
+					}
+					if str, ok := credsMap["port"].(float64); ok {
+						myCredentials.Port = str
 					}
 					for _, k := range serviceBinding {
 						app, _ := client.GetAppByGuid(k.AppGuid)
@@ -150,12 +163,34 @@ func QueryFoundation(apiaddress string, username string, password string, skipss
 	Foundations = append(Foundations, myFoundation)
 }
 func main() {
+	noheaderPtr := flag.Bool("noheader", false, "Disable printing column headings")
+	jsonPtr := flag.Bool("json", false, "Output is in json")
+	csvFileName = *flag.String("cfendpoints", "cfendpoints.csv", "csv file that contains: ApiEndpoint, Username, Password, skip-ssl-validation")
+	labelsToQuery = *flag.String("labels", "redislabs,redislabs-enterprise-cluster", "Only query given service labels. Use comma separated. Do not use comma space separated.")
+	flag.Parse()
 	ParseConfigFile()
-	//thread this next loop
+	//thread this next loop eventually
 	for _, i := range Cfendpoints {
 		QueryFoundation(i.ApiAddress, i.Username, i.Password, i.SkipSslValidation)
 		//os.Exit(0)
 	}
-	FoundationsJson, _ := json.Marshal(Foundations)
-	fmt.Println(string(FoundationsJson))
+	if *jsonPtr {
+		FoundationsJson, _ := json.Marshal(Foundations)
+		fmt.Println(string(FoundationsJson))
+	} else {
+		if !*noheaderPtr {
+			fmt.Println("ApiEndpoint, Service, Service Plan, Service Instance, Host, Username, Password, Port, App Name, Space, Org")
+		}
+		for _, i := range Foundations {
+			for _, j := range i.Services {
+				for _, k := range j.ServicePlan {
+					for _, l := range k.ServiceInstances {
+						for _, m := range  l.App {
+							fmt.Printf("\"%v\",\"%v\",\"%v\",\"%v\",\"%v\",\"%v\",\"%v\",\"%v\",\"%v\",\"%v\",\"%v\"\n", i.ApiEndpoint, j.Name, k.Name,  l.Name, l.Credentials.Host, l.Credentials.User, l.Credentials.Password, l.Credentials.Port, m.Name, m.Space, m.Org)
+						}
+					}
+				}
+			}
+		}
+	}
 }
