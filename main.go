@@ -16,8 +16,8 @@ import (
 
 var Cfendpoints []cfEndpoint
 var Foundations []foundation
-var csvFileName string
-var labelsToQuery string
+var csvFileName *string
+var labelsToQuery *string
 
 type cfEndpoint struct {
 	ApiAddress		string			`json:"apiaddress"`
@@ -55,7 +55,7 @@ type application struct {
 }
 
 func ParseConfigFile() {
-	csvFile, _ := os.Open(csvFileName)
+	csvFile, _ := os.Open(*csvFileName)
 	reader := csv.NewReader(bufio.NewReader(csvFile))
 	for {
 		line, error := reader.Read()
@@ -79,7 +79,25 @@ func ParseConfigFile() {
 	//fmt.Println(string(cfendpointsJson))
 	//fmt.Printf("%+v",cfendpoints)
 }
-func QueryFoundation(apiaddress string, username string, password string, skipsslvalidation bool) {
+func serviceLabels(apiaddress string, username string, password string, skipsslvalidation bool) {
+	c := &cfclient.Config {
+		ApiAddress:		apiaddress,
+		Username:		username,
+		Password:		password,
+		SkipSslValidation:	skipsslvalidation,
+	}
+	client, err := cfclient.NewClient(c)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	services, _ := client.ListServices()
+	fmt.Println(apiaddress)
+	for _, i := range services {
+		fmt.Println("\t",i.Label)
+	}
+}
+func QueryFoundation(apiaddress string, username string, password string, skipsslvalidation bool, labels string) {
 	c := &cfclient.Config {
 		ApiAddress:		apiaddress,
 		Username:		username,
@@ -94,12 +112,13 @@ func QueryFoundation(apiaddress string, username string, password string, skipss
 	myFoundation := foundation{
 		ApiEndpoint: apiaddress,
 	}
-	v := url.Values{}
-	if labelsToQuery != "" {
-		v.Set("q", "label IN " + labelsToQuery)
-	}
-	//fmt.Println(v.Encode())
 //first get the service
+	v := url.Values{}
+	v.Set("q", "label IN " + labels)
+	if labels == "" {
+		v = nil
+	}
+	//fmt.Println("label" + v.Encode() + "/label")
 	services, _ := client.ListServicesByQuery(v)
 	for _, h := range services {
 		myService := service{
@@ -165,13 +184,21 @@ func QueryFoundation(apiaddress string, username string, password string, skipss
 func main() {
 	noheaderPtr := flag.Bool("noheader", false, "Disable printing column headings")
 	jsonPtr := flag.Bool("json", false, "Output is in json")
-	csvFileName = *flag.String("cfendpoints", "cfendpoints.csv", "csv file that contains: ApiEndpoint, Username, Password, skip-ssl-validation")
-	labelsToQuery = *flag.String("labels", "redislabs,redislabs-enterprise-cluster", "Only query given service labels. Use comma separated. Do not use comma space separated.")
+	printServiceLabels := flag.Bool("printServiceLabels", false, "Print deployments and exit")
+	csvFileName = flag.String("cfendpoints", "cfendpoints.csv", "csv file that contains: ApiEndpoint, Username, Password, skip-ssl-validation")
+	labelsToQuery = flag.String("labels", "redislabs,redislabs-enterprise-cluster", "Only query given service labels. Use comma separated. Do not use comma space separated.")
 	flag.Parse()
 	ParseConfigFile()
+	if *printServiceLabels {
+		for _, i := range Cfendpoints {
+			serviceLabels(i.ApiAddress, i.Username, i.Password, i.SkipSslValidation)
+		os.Exit(0)
+		}
+	}
+	//fmt.Printf("LABELS:%s:LABELS\n", *labelsToQuery)
 	//thread this next loop eventually
 	for _, i := range Cfendpoints {
-		QueryFoundation(i.ApiAddress, i.Username, i.Password, i.SkipSslValidation)
+		QueryFoundation(i.ApiAddress, i.Username, i.Password, i.SkipSslValidation, *labelsToQuery)
 		//os.Exit(0)
 	}
 	if *jsonPtr {
