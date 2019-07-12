@@ -1,16 +1,17 @@
 package main
 
 import (
-	"io"
-	"os"
-	"fmt"
-	"flag"
 	"bufio"
-	"strings"
-	"net/url"
-	"strconv"
 	"encoding/csv"
-	"encoding/json"
+	//"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+
 	"github.com/cloudfoundry-community/go-cfclient"
 )
 
@@ -19,41 +20,28 @@ var Foundations []foundation
 var csvFileName *string
 var labelsToQuery *string
 
+// define the foundation and creds
 type cfEndpoint struct {
-	ApiAddress		string			`json:"apiaddress"`
-	Username		string			`json:"username"`
-	Password		string			`json:"password"`
-	SkipSslValidation	bool			`json:"skipSslValidation"`
-}
-type foundation struct {
-	ApiEndpoint		string			`json:"apiEndpoint"`
-	Services		[]service		`json:"services"`
-}
-type service struct {
-	Name			string			`'json:"serviceName"`
-	ServicePlan		[]servicePlan		`'json:"sericePLan"`
-}
-type servicePlan struct {
-	Name			string			`json:servicePlanName"`
-	ServiceInstances	[]serviceInstance	`json:"serviceInstances,omitempty"`
-}
-type serviceInstance struct {
-	Name			string			`json:serviceInstanceName"`
-	Credentials		credentials		`json:credentials"`
-	App			[]application		`json:app,omitempty"`
-}
-type credentials struct {
-	Host			string			`json:"host,omitempty"`
-	User			string			`json:"user,omitempty"`
-	Password		string			`json:"password,omitempty"`
-	Port			float64			`json:"port,omitempty"`
-}
-type application struct {
-	Name			string			`json:"app"`
-	Space			string			`json:"space"`
-	Org			string			`json:"org"`
+	ApiAddress        string `json:"apiaddress"`
+	Username          string `json:"username"`
+	Password          string `json:"password"`
+	SkipSslValidation bool   `json:"skipSslValidation"`
 }
 
+// get services for the foundation
+type foundation struct {
+	ApiEndpoint      string    `json:"apiEndpoint"`
+	ServiceInstance []serviceInstance `json:"serviceInstance"`
+}
+
+type serviceInstance struct {
+	ServiceName         string `json:"serviceName"`
+	ServicePlan         string `json:"servicePlan"`
+	ServiceInstanceName string `json:"serviceInstanceName"`
+	Org                 string `json:"service"`
+	Space               string `json:"service"`
+	NumberOfBindings    int    `json:"numberOfBindings"`
+}
 func ParseConfigFile() {
 	csvFile, _ := os.Open(*csvFileName)
 	reader := csv.NewReader(bufio.NewReader(csvFile))
@@ -68,23 +56,23 @@ func ParseConfigFile() {
 		if 35 != strings.TrimSpace(line[0])[0] {
 			b, _ := strconv.ParseBool(line[3])
 			Cfendpoints = append(Cfendpoints, cfEndpoint{
-				ApiAddress:		line[0],
-				Username:		line[1],
-				Password:		line[2],
-				SkipSslValidation:	b,
+				ApiAddress:        line[0],
+				Username:          line[1],
+				Password:          line[2],
+				SkipSslValidation: b,
 			})
 		}
 	}
-	//cfendpointsJson, _ := json.Marshal(cfendpoints)
-	//fmt.Println(string(cfendpointsJson))
-	//fmt.Printf("%+v",cfendpoints)
 }
+
+// create the client to do curl commands with
 func serviceLabels(apiaddress string, username string, password string, skipsslvalidation bool) {
-	c := &cfclient.Config {
-		ApiAddress:		apiaddress,
-		Username:		username,
-		Password:		password,
-		SkipSslValidation:	skipsslvalidation,
+	fmt.Printf("im here\n")
+	c := &cfclient.Config{
+		ApiAddress:        apiaddress,
+		Username:          username,
+		Password:          password,
+		SkipSslValidation: skipsslvalidation,
 	}
 	client, err := cfclient.NewClient(c)
 	if err != nil {
@@ -94,130 +82,102 @@ func serviceLabels(apiaddress string, username string, password string, skipsslv
 	services, _ := client.ListServices()
 	fmt.Println(apiaddress)
 	for _, i := range services {
-		fmt.Println("\t",i.Label)
+		fmt.Println("\t", i.Label)
 	}
 }
+
 func QueryFoundation(apiaddress string, username string, password string, skipsslvalidation bool, labels string) {
-	c := &cfclient.Config {
-		ApiAddress:		apiaddress,
-		Username:		username,
-		Password:		password,
-		SkipSslValidation:	skipsslvalidation,
+
+	c := &cfclient.Config{
+		ApiAddress:        apiaddress,
+		Username:          username,
+		Password:          password,
+		SkipSslValidation: skipsslvalidation,
 	}
 	client, err := cfclient.NewClient(c)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	myFoundation := foundation{
-		ApiEndpoint: apiaddress,
-	}
-//first get the service
-	v := url.Values{}
-	v.Set("q", "label IN " + labels)
-	if labels == "" {
-		v = nil
-	}
-	//fmt.Println("label" + v.Encode() + "/label")
-	services, _ := client.ListServicesByQuery(v)
-	for _, h := range services {
-		myService := service{
-			Name: h.Label,
-		}
-		v = url.Values{}
-		v.Set("q", "service_guid:" + h.Guid)
-//next get the service plans
-		servicePlans, _ := client.ListServicePlansByQuery(v)
-		for _, i := range servicePlans {
-			myServicePlan := servicePlan{}
-			myServicePlan.Name = i.Name
-			v = url.Values{}
-			v.Set("q", "service_plan_guid:" + i.Guid)
-//next get service instances
-			serviceInstances, _ := client.ListServiceInstancesByQuery(v)
-			for _, j := range serviceInstances {
-				myServiceInstance := serviceInstance{}
-				myServiceInstance.Name = j.Name
-//next get service bindings
-				v = url.Values{}
-				v.Set("q", "service_instance_guid:" + j.Guid)
-				serviceBinding, _ := client.ListServiceBindingsByQuery(v)
-				//situation where a service broker exists without bindings
-				if len(serviceBinding) > 0 {
-//finally we print the binding details and iterate the apps
-					credsMap := serviceBinding[0].Credentials.(map[string]interface{})
-					//fmt.Printf("%+v\n\n", reflect.TypeOf(credsMap["port"]))
-					myCredentials := credentials {}
+
+	serviceInstances, _ := client.ListServiceInstances()
+	for _, i := range serviceInstances {
+		service, _ := client.GetServiceByGuid(i.ServiceGuid)
+		if "" == labels || strings.LastIndex(labels, service.Label) > -1 {
+			v := url.Values{}
+			v.Set("q", "service_instance_guid:"+i.Guid)
+			serviceBindings, _ := client.ListServiceBindingsByQuery(v)
+			servicePlan, _ := client.GetServicePlanByGUID(i.ServicePlanGuid)
+			space, _ := client.GetSpaceByGuid(i.SpaceGuid)
+			org, _ := client.GetOrgByGuid(space.OrganizationGuid)
+			hostname := ""
+			username := ""
+			port := 0.0
+			if service.Label == "redislabs" {
+				if len(serviceBindings) > 0 {
+					credsMap := serviceBindings[0].Credentials.(map[string]interface{})
 					if str, ok := credsMap["host"].(string); ok {
-						myCredentials.Host = str
+						hostname = str
 					}
 					if str, ok := credsMap["name"].(string); ok {
-						myCredentials.User = str
+						username = str
 					}
-					if str, ok := credsMap["password"].(string); ok {
-						myCredentials.Password = str
+					if myfloat, ok := credsMap["port"].(float64); ok {
+						port = myfloat
 					}
-					if str, ok := credsMap["port"].(float64); ok {
-						myCredentials.Port = str
-					}
-					for _, k := range serviceBinding {
-						app, _ := client.GetAppByGuid(k.AppGuid)
-						space, _ := client.GetSpaceByGuid(app.SpaceGuid)
-						org, _ := client.GetOrgByGuid(space.OrganizationGuid)
-						myApp := application {
-							Name: app.Name,
-							Space: space.Name,
-							Org: org.Name,
+				} else {
+					//if you get a delete failed, you'll be happy i left these
+					//fmt.Printf("else: %v, ", i.ServiceKeysUrl)
+					//fmt.Printf("%+v,%v,%v,%v,%v,%v,%v\n", apiaddress, service.Label, servicePlan.Name, i.Name, org.Name, space.Name, len(serviceBindings))
+					//fmt.Printf("keysUrl: %v\n", i.ServiceKeysUrl)
+					serviceKeysGuid := i.ServiceKeysUrl[22:58]
+					//fmt.Printf("else: %v\n", serviceKeysGuid)
+					serviceKeys, _ := client.GetServiceKeysByInstanceGuid(serviceKeysGuid)
+					if len(serviceKeys) > 0 {
+						credsMap := serviceKeys[0].Credentials.(map[string]interface{})
+						if str, ok := credsMap["host"].(string); ok {
+							hostname = str
 						}
-						myServiceInstance.App = append(myServiceInstance.App, myApp)
+						if str, ok := credsMap["name"].(string); ok {
+							username = str
+						}
+						if myfloat, ok := credsMap["port"].(float64); ok {
+							port = myfloat
+						}
+					} else {
+						hostname = "ERROR"
+						username = "ERROR"
+						port = 0.0
 					}
-					myServiceInstance.Credentials = myCredentials
 				}
-				myServicePlan.ServiceInstances = append(myServicePlan.ServiceInstances, myServiceInstance)
-			}
-			myService.ServicePlan = append(myService.ServicePlan, myServicePlan)
-		}
-		myFoundation.Services = append(myFoundation.Services, myService)
+			fmt.Printf("%+v,%v,%v,%v,%v,%v,%v,%v,%v,%v\n", apiaddress, service.Label, servicePlan.Name, i.Name, org.Name, space.Name, len(serviceBindings), hostname, username, port)
+			} else {
+                fmt.Printf("%+v,%v,%v,%v,%v,%v,%v,%v,%v,%v\n", apiaddress, service.Label, servicePlan.Name, i.Name, org.Name, space.Name, len(serviceBindings), hostname, username, port)
+            }
+        }
 	}
-	Foundations = append(Foundations, myFoundation)
 }
+
 func main() {
 	noheaderPtr := flag.Bool("noheader", false, "Disable printing column headings")
-	jsonPtr := flag.Bool("json", false, "Output is in json")
 	printServiceLabels := flag.Bool("printServiceLabels", false, "Print deployments and exit")
 	csvFileName = flag.String("cfendpoints", "cfendpoints.csv", "csv file that contains: ApiEndpoint, Username, Password, skip-ssl-validation")
-	labelsToQuery = flag.String("labels", "redislabs,redislabs-enterprise-cluster", "Only query given service labels. Use comma separated. Do not use comma space separated.")
+	labelsToQuery = flag.String("labels", "redislabs,redislabs-enterprise-cluster", "Only print given service labels. Use comma separated. Do not use comma space separated.")
 	flag.Parse()
 	ParseConfigFile()
 	if *printServiceLabels {
 		for _, i := range Cfendpoints {
+	fmt.Printf("im here\n")
 			serviceLabels(i.ApiAddress, i.Username, i.Password, i.SkipSslValidation)
-		os.Exit(0)
 		}
+			os.Exit(0)
 	}
-	//fmt.Printf("LABELS:%s:LABELS\n", *labelsToQuery)
-	//thread this next loop eventually
+	if !*noheaderPtr {
+		fmt.Printf("ApiAddress,Service_Label,Serice_Plan,Service_Instance,Org,Space,Number_of_Service_Bindings,Host(redislabs_only),username,port\n")
+	}
+	//thread this next loop , if you just put go in front of it, it doesn't print, you need to add sleeps or something
 	for _, i := range Cfendpoints {
 		QueryFoundation(i.ApiAddress, i.Username, i.Password, i.SkipSslValidation, *labelsToQuery)
 		//os.Exit(0)
-	}
-	if *jsonPtr {
-		FoundationsJson, _ := json.Marshal(Foundations)
-		fmt.Println(string(FoundationsJson))
-	} else {
-		if !*noheaderPtr {
-			fmt.Println("ApiEndpoint, Service, Service Plan, Service Instance, Host, Username, Password, Port, App Name, Space, Org")
-		}
-		for _, i := range Foundations {
-			for _, j := range i.Services {
-				for _, k := range j.ServicePlan {
-					for _, l := range k.ServiceInstances {
-						for _, m := range  l.App {
-							fmt.Printf("\"%v\",\"%v\",\"%v\",\"%v\",\"%v\",\"%v\",\"%v\",\"%v\",\"%v\",\"%v\",\"%v\"\n", i.ApiEndpoint, j.Name, k.Name,  l.Name, l.Credentials.Host, l.Credentials.User, l.Credentials.Password, l.Credentials.Port, m.Name, m.Space, m.Org)
-						}
-					}
-				}
-			}
-		}
 	}
 }

@@ -1,7 +1,10 @@
 Download the release or build yourself.
+
 Configure your cfendpoints.csv
+
 Run the binary or using go interpreter 
-  
+
+```
   -cfendpoints string
         csv file that contains: ApiEndpoint, Username, Password, skip-ssl-validation (default "cfendpoints.csv")
   -json
@@ -12,4 +15,4 @@ Run the binary or using go interpreter
         Disable printing column headings
   -printServiceLabels
         Print deployments and exit
-
+```
